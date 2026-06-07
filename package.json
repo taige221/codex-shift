@@ -1,0 +1,29 @@
+{
+  "name": "codex-model-router",
+  "version": "0.1.0",
+  "description": "A small pre-flight router that chooses model and reasoning effort for Codex CLI tasks.",
+  "type": "module",
+  "bin": {
+    "codex-shift": "./src/cli/index.js",
+    "codex-shift-hud": "./src/cli/hud-bin.js",
+    "codex-shift-shim": "./src/cli/shim.js",
+    "codex-router": "./src/cli/index.js",
+    "codex-model-router": "./src/cli/index.js"
+  },
+  "scripts": {
+    "test": "node --test",
+    "route": "node src/cli/index.js route",
+    "dry-run": "node src/cli/index.js dry-run"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "keywords": [
+    "codex",
+    "openai",
+    "router",
+    "cli",
+    "reasoning-effort"
+  ],
+  "license": "MIT"
+}
