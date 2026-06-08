@@ -22,6 +22,13 @@ export function finalizeDecision(analysis, features, options = {}) {
     assertValidEffort(options.effort, "options.effort");
     effort = options.effort;
     reasons.push("effort overridden by flag");
+    if (options.promptEffortDirective?.effort) {
+      reasons.push(`${options.promptEffortDirective.directive} directive ignored because --effort was set`);
+    }
+  } else if (options.promptEffortDirective?.effort) {
+    assertValidEffort(options.promptEffortDirective.effort, "prompt effort directive");
+    effort = options.promptEffortDirective.effort;
+    reasons.push(`effort forced by ${options.promptEffortDirective.directive} directive`);
   } else if (shouldDowngradeForBudget(config, usage, classification)) {
     const downgraded = downgradeEffort(effort);
     if (downgraded !== effort) {
@@ -140,4 +147,3 @@ function normalizeSupportedEfforts(capabilities) {
   if (Array.isArray(capabilities.reasoningEfforts)) return capabilities.reasoningEfforts;
   return null;
 }
-

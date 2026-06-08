@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { EventEmitter } from "node:events";
 import { createServer } from "node:http";
 import { routePrompt } from "../router/index.js";
+import { parsePromptEffortDirective } from "../router/directives.js";
 import { loadConfig } from "../config/index.js";
 import { readCodexUsage } from "../usage/index.js";
 import { buildRouteStatus, buildTokenUsageStatus, updateRouteStatus, writeRouteStatus } from "../ui/status.js";
@@ -100,14 +101,16 @@ export function rewriteJsonRpcMessage(message, options = {}) {
   }
 
   const prompt = extractPromptText(message.params.input);
+  const promptEffortDirective = parsePromptEffortDirective(prompt);
   const configPath = options.configPath ?? process.env.CODEX_SHIFT_CONFIG;
   const { config } = loadConfig(configPath);
   const usage = options.noUsage || process.env.CODEX_SHIFT_NO_USAGE
     ? null
     : readCodexUsage(options.codexHome ?? process.env.CODEX_HOME);
-  const decision = routePrompt(prompt, {
+  const decision = routePrompt(promptEffortDirective.prompt, {
     config,
     model: message.params.model ?? undefined,
+    promptEffortDirective,
     usage
   });
 

@@ -57,6 +57,25 @@ test("routes default efforts", () => {
   assert.equal(routePrompt("production config 是什么").effort, "low");
 });
 
+test("routes leading prompt effort directives", () => {
+  const high = routePrompt("/high 解释一下这个函数");
+  assert.equal(high.classification, "simple");
+  assert.equal(high.requestedEffort, "high");
+  assert.equal(high.effort, "high");
+  assert.ok(high.reasons.some((reason) => reason.includes("effort forced by /high directive")));
+
+  assert.equal(routePrompt("#high 解释一下这个函数").effort, "high");
+  assert.equal(routePrompt("/xhigh fix bug").effort, "xhigh");
+  assert.equal(routePrompt("#xhigh fix bug").effort, "xhigh");
+  assert.equal(routePrompt("/medium production data loss incident").effort, "medium");
+  assert.equal(routePrompt("/minimal 解释一下").effort, "low");
+  assert.equal(routePrompt("#minimal 解释一下").effort, "low");
+  assert.equal(routePrompt("/higher 解释一下").effort, "low");
+  assert.equal(routePrompt("#higher 解释一下").effort, "low");
+  assert.equal(routePrompt("解释一下 /high 是什么").effort, "low");
+  assert.equal(routePrompt("解释一下 #high 是什么").effort, "low");
+});
+
 test("returns confidence, scores, and reasons", () => {
   const decision = routePrompt("fix this failing test");
   assert.equal(typeof decision.confidence, "number");
@@ -84,6 +103,14 @@ test("downgrades non-critical work over budget", () => {
   assert.equal(decision.effort, "low");
 });
 
+test("does not downgrade forced prompt effort directives over budget", () => {
+  const decision = routePrompt("/high fix bug", {
+    usage: { secondaryUsedPercent: 90 }
+  });
+  assert.equal(decision.requestedEffort, "high");
+  assert.equal(decision.effort, "high");
+});
+
 test("keeps critical work over budget", () => {
   const decision = routePrompt("production data loss incident", {
     usage: { secondaryUsedPercent: 90 }
@@ -102,6 +129,13 @@ test("validates requested and configured efforts", () => {
   );
 });
 
+test("flag effort overrides prompt effort directives", () => {
+  const decision = routePrompt("/high fix bug", { effort: "low" });
+  assert.equal(decision.requestedEffort, "low");
+  assert.equal(decision.effort, "low");
+  assert.ok(decision.reasons.some((reason) => reason.includes("/high directive ignored")));
+});
+
 test("falls back when selected model does not support xhigh", () => {
   const decision = routePrompt("production data loss incident", {
     model: "gpt-lite",
@@ -112,6 +146,17 @@ test("falls back when selected model does not support xhigh", () => {
   assert.equal(decision.requestedEffort, "xhigh");
   assert.equal(decision.effort, "high");
   assert.ok(decision.reasons.some((reason) => reason.includes("fell back to high")));
+});
+
+test("falls back when prompt directive selects unsupported effort", () => {
+  const decision = routePrompt("/xhigh fix bug", {
+    model: "gpt-lite",
+    modelCapabilities: {
+      "gpt-lite": ["minimal", "low", "medium", "high"]
+    }
+  });
+  assert.equal(decision.requestedEffort, "xhigh");
+  assert.equal(decision.effort, "high");
 });
 
 test("treats no-code requests as read-only without making them simple", () => {

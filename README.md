@@ -55,6 +55,19 @@ When local Codex weekly usage is above the soft limit, non-critical tasks are do
 
 Supported efforts are `minimal`, `low`, `medium`, `high`, and `xhigh`. The router validates requested and configured efforts before returning a decision. If a model does not support the requested effort, the router falls back to the nearest lower supported effort, for example `xhigh` to `high`.
 
+Prompt effort directives can force a turn without changing config:
+
+```bash
+codex-router dry-run "/high fix this failing test"
+codex-shift turn --thread 019e... "/xhigh diagnose production data loss"
+codex-shift tui
+# then type: #high fix this failing test
+```
+
+Only a leading `/low`, `/medium`, `/high`, `/xhigh`, `#low`, `#medium`, `#high`, or `#xhigh` token is recognized. The directive must be followed by actual prompt text and is lower priority than `--effort`. `/minimal` and `#minimal` are not prompt directives.
+
+In the native Codex TUI, `/` is reserved for Codex's own slash-command parser. Use the `#...` aliases there, for example `#high fix this failing test`. The TUI proxy keeps the input text unchanged so Codex's local echo and server echo stay in sync; this means the visible message still contains `#high`. The `/...` form is intended for shell paths such as `codex-router`, `codex-shift turn`, and routed `codex exec`, where the directive is stripped before dispatch.
+
 Explicit read-only language such as "不要改代码" or "do not edit" sets `readOnly: true` and selects read-only execution controls. It does not by itself make the prompt `simple`.
 
 ## Commands

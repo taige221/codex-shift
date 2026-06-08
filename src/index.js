@@ -4,6 +4,7 @@ export * from "./config/index.js";
 export * from "./proxy/remote-proxy.js";
 export * from "./router/index.js";
 export * from "./router/budget.js";
+export * from "./router/directives.js";
 export * from "./router/extractFeatures.js";
 export * from "./router/finalize.js";
 export * from "./router/merge.js";
@@ -17,4 +18,3 @@ export * from "./ui/hud.js";
 export * from "./ui/status.js";
 export * from "./ui/tui.js";
 export * from "./usage/index.js";
-

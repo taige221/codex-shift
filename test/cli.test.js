@@ -27,6 +27,36 @@ test("dry-run app-server previews turn/start without executing proxy", () => {
   assert.match(result.stdout, /"text":"\[prompt omitted\]"/);
 });
 
+test("dry-run strips prompt effort directives from included previews", () => {
+  const result = runCli([
+    "dry-run",
+    "--transport",
+    "app-server",
+    "--thread",
+    "019e-test-thread",
+    "--include-prompt",
+    "/high 解释一下这个函数"
+  ]);
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /effort: high/);
+  assert.match(result.stdout, /"text":"解释一下这个函数"/);
+  assert.doesNotMatch(result.stdout, /"text":"\/high/);
+});
+
+test("dry-run supports tui-safe prompt effort directive aliases", () => {
+  const result = runCli([
+    "dry-run",
+    "--include-prompt",
+    "#high 解释一下这个函数"
+  ]);
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /effort: high/);
+  assert.match(result.stdout, /'解释一下这个函数'/);
+  assert.doesNotMatch(result.stdout, /'#high/);
+});
+
 test("dry-run app-server requires a thread id for exact request preview", () => {
   const result = runCli([
     "dry-run",
@@ -78,6 +108,40 @@ test("turn executes app-server proxy and sends the real prompt", () => {
     assert.equal(request.params.effort, "high");
     assert.equal(request.params.summary, "concise");
     assert.equal(request.params.input[0].text, prompt);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("turn strips prompt effort directives before sending app-server input", () => {
+  const tmp = mkdtempSync(join(tmpdir(), "codex-shift-cli-directive-"));
+  const fakeCodex = join(tmp, "codex");
+  const requestPath = join(tmp, "request.jsonl");
+
+  writeFileSync(
+    fakeCodex,
+    [
+      "#!/bin/sh",
+      `cat > ${shellQuote(requestPath)}`,
+      "printf '%s\\n' '{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"turnId\":\"turn-1\"}}'"
+    ].join("\n")
+  );
+  chmodSync(fakeCodex, 0o755);
+
+  try {
+    const result = runCli([
+      "turn",
+      "--thread",
+      "019e-test-thread",
+      "--codex-bin",
+      fakeCodex,
+      "/xhigh fix bug"
+    ]);
+
+    assert.equal(result.status, 0, result.stderr);
+    const request = JSON.parse(readFileSync(requestPath, "utf8").trim());
+    assert.equal(request.params.effort, "xhigh");
+    assert.equal(request.params.input[0].text, "fix bug");
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }

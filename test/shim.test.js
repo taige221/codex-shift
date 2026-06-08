@@ -30,6 +30,26 @@ test("shim routes codex exec prompts through codex-shift", () => {
   }
 });
 
+test("shim routes and strips prompt effort directives for codex exec", () => {
+  const fixture = createFakeCodex();
+
+  try {
+    const result = runShim(["exec", "/high 解释一下这个函数"], fixture);
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.deepEqual(readArgs(fixture), [
+      "exec",
+      "-m",
+      "gpt-5.5",
+      "-c",
+      'model_reasoning_effort="high"',
+      "解释一下这个函数"
+    ]);
+  } finally {
+    fixture.cleanup();
+  }
+});
+
 test("shim routes top-level initial prompts", () => {
   const fixture = createFakeCodex();
 
@@ -43,6 +63,25 @@ test("shim routes top-level initial prompts", () => {
       "-c",
       'model_reasoning_effort="high"',
       "review改修这个 PR"
+    ]);
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test("shim routes and strips prompt effort directives for top-level prompts", () => {
+  const fixture = createFakeCodex();
+
+  try {
+    const result = runShim(["/xhigh", "fix bug"], fixture);
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.deepEqual(readArgs(fixture), [
+      "-m",
+      "gpt-5.5",
+      "-c",
+      'model_reasoning_effort="xhigh"',
+      "fix bug"
     ]);
   } finally {
     fixture.cleanup();

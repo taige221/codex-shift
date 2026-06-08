@@ -3,6 +3,7 @@ import { dirname, join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { routePrompt } from "../router/index.js";
+import { parsePromptEffortDirective } from "../router/directives.js";
 import { loadConfig } from "../config/index.js";
 import { readCodexUsage } from "../usage/index.js";
 import { runCodex } from "../codex/index.js";
@@ -117,7 +118,7 @@ function runExecShim(args, realCodex) {
     return runRealCodex(realCodex, args);
   }
 
-  return runRoutedCodexExec(realCodex, parsed);
+  return runRoutedCodexExec(realCodex, prepareRoutedPromptInvocation(parsed));
 }
 
 function runTopLevelPromptShim(args, realCodex) {
@@ -126,7 +127,8 @@ function runTopLevelPromptShim(args, realCodex) {
     return runRealCodex(realCodex, args);
   }
 
-  const decision = buildDecision(parsed);
+  const routed = prepareRoutedPromptInvocation(parsed);
+  const decision = buildDecision(routed);
   if (process.env.CODEX_SHIFT_TRACE) {
     printTrace(decision);
   }
@@ -138,15 +140,15 @@ function runTopLevelPromptShim(args, realCodex) {
     `model_reasoning_effort="${decision.effort}"`
   ];
 
-  if (parsed.cwd) {
-    routedArgs.push("-C", parsed.cwd);
+  if (routed.cwd) {
+    routedArgs.push("-C", routed.cwd);
   }
-  if (decision.readOnly && !hasSandboxOption(parsed.codexArgs)) {
+  if (decision.readOnly && !hasSandboxOption(routed.codexArgs)) {
     routedArgs.push("-s", "read-only");
   }
-  routedArgs.push(...parsed.codexArgs, parsed.prompt);
+  routedArgs.push(...routed.codexArgs, routed.prompt);
 
-  return runRealCodex(realCodex, routedArgs, parsed.cwd);
+  return runRealCodex(realCodex, routedArgs, routed.cwd);
 }
 
 function runRoutedCodexExec(realCodex, parsed) {
@@ -169,8 +171,18 @@ function buildDecision(parsed) {
   return routePrompt(parsed.prompt, {
     config,
     model: parsed.model,
+    promptEffortDirective: parsed.promptEffortDirective,
     usage
   });
+}
+
+function prepareRoutedPromptInvocation(parsed) {
+  const promptEffortDirective = parsePromptEffortDirective(parsed.prompt);
+  return {
+    ...parsed,
+    prompt: promptEffortDirective.prompt,
+    promptEffortDirective
+  };
 }
 
 function parsePromptInvocation(args) {

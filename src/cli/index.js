@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { basename } from "node:path";
 import { routePrompt } from "../router/index.js";
+import { parsePromptEffortDirective } from "../router/directives.js";
 import { loadConfig } from "../config/index.js";
 import { readCodexUsage } from "../usage/index.js";
 import { buildCodexCommand, runCodex } from "../codex/index.js";
@@ -58,14 +59,18 @@ async function main() {
 
   const { config } = loadConfig(parsed.configPath);
   const usage = parsed.noUsage ? null : readCodexUsage(parsed.codexHome);
-  const decision = routePrompt(parsed.prompt, {
+  const promptDirective = parsePromptEffortDirective(parsed.prompt);
+  const routedPrompt = promptDirective.prompt;
+  const routedParsed = { ...parsed, prompt: routedPrompt };
+  const decision = routePrompt(routedPrompt, {
     config,
     model: parsed.model,
     effort: parsed.effort,
+    promptEffortDirective: promptDirective,
     usage
   });
   const transport = resolveTransport(parsed);
-  const preview = buildTransportPreview(decision, parsed, transport);
+  const preview = buildTransportPreview(decision, routedParsed, transport);
 
   if (parsed.json) {
     console.log(JSON.stringify({ decision, usage, transport, ...preview }, null, 2));
@@ -79,7 +84,7 @@ async function main() {
   }
 
   if (transport === "app-server") {
-    const result = callTurnStart(decision, buildAppServerOptions(parsed, parsed.prompt));
+    const result = callTurnStart(decision, buildAppServerOptions(routedParsed, routedPrompt));
     if (result.stdout) process.stdout.write(result.stdout);
     if (result.stderr) process.stderr.write(result.stderr);
     if (typeof result.status === "number") {
@@ -96,7 +101,7 @@ async function main() {
     codexBin: parsed.codexBin,
     cwd: parsed.cwd,
     codexArgs: parsed.codexArgs,
-    prompt: parsed.prompt
+    prompt: routedPrompt
   });
 
   if (typeof result.status === "number") {
@@ -408,6 +413,11 @@ Behavior:
   route/dry-run never execute Codex. With --transport app-server they build the exact
   turn/start JSON-RPC request, so --thread is required.
   turn starts a new app-server turn on the given thread and forwards proxy stdout/stderr.
+  A leading /low, /medium, /high, or /xhigh prompt directive forces effort for
+  shell routes and is stripped before dispatch. In native TUI, use #low,
+  #medium, #high, or #xhigh because / is reserved for Codex commands; the proxy
+  keeps TUI input unchanged so the message is not duplicated. --effort still
+  takes precedence.
 `);
 }
 

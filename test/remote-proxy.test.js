@@ -43,6 +43,67 @@ test("rewrites turn/start with routed model and effort", () => {
   assert.equal(Object.hasOwn(result.decision, "prompt"), false);
 });
 
+test("rewrites turn/start prompt effort directives without changing input", () => {
+  const request = {
+    jsonrpc: "2.0",
+    id: 7,
+    method: "turn/start",
+    params: {
+      threadId: "019e-test-thread",
+      input: [{ type: "text", text: "/high 解释一下这个函数" }]
+    }
+  };
+
+  const result = rewriteJsonRpcMessage(request, { noUsage: true });
+
+  assert.equal(result.routed, true);
+  assert.equal(result.decision.classification, "simple");
+  assert.equal(result.message.params.effort, "high");
+  assert.equal(result.message.params.input[0].text, "/high 解释一下这个函数");
+});
+
+test("rewrites tui-safe prompt effort directive aliases", () => {
+  const request = {
+    jsonrpc: "2.0",
+    id: 7,
+    method: "turn/start",
+    params: {
+      threadId: "019e-test-thread",
+      input: [{ type: "text", text: "#high 解释一下这个函数" }]
+    }
+  };
+
+  const result = rewriteJsonRpcMessage(request, { noUsage: true });
+
+  assert.equal(result.message.params.effort, "high");
+  assert.equal(result.message.params.input[0].text, "#high 解释一下这个函数");
+});
+
+test("rewrites multi-part prompt effort directives without changing input", () => {
+  const request = {
+    jsonrpc: "2.0",
+    id: 7,
+    method: "turn/start",
+    params: {
+      threadId: "019e-test-thread",
+      input: [
+        { type: "text", text: "/xhigh" },
+        { type: "image", path: "/tmp/a.png" },
+        { type: "text", text: "fix bug" }
+      ]
+    }
+  };
+
+  const result = rewriteJsonRpcMessage(request, { noUsage: true });
+
+  assert.equal(result.message.params.effort, "xhigh");
+  assert.deepEqual(result.message.params.input, [
+    { type: "text", text: "/xhigh" },
+    { type: "image", path: "/tmp/a.png" },
+    { type: "text", text: "fix bug" }
+  ]);
+});
+
 test("writes routed status without prompt text", () => {
   const tmp = mkdtempSync(join(tmpdir(), "codex-shift-status-"));
   const statusFile = join(tmp, "status.json");
