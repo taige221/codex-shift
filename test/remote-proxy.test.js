@@ -304,6 +304,30 @@ test("respects explicit cwd in thread/list", () => {
   assert.deepEqual(JSON.parse(result.payload), request);
 });
 
+test("injects cwd filter into null thread/list cwd", () => {
+  const request = {
+    jsonrpc: "2.0",
+    id: 1,
+    method: "thread/list",
+    params: {
+      cwd: null
+    }
+  };
+
+  const result = rewriteJsonRpcPayload(JSON.stringify(request), {
+    cwdFilter: "/tmp/project",
+    noUsage: true
+  });
+
+  assert.equal(result.routed, false);
+  assert.deepEqual(JSON.parse(result.payload), {
+    ...request,
+    params: {
+      cwd: "/tmp/project"
+    }
+  });
+});
+
 test("leaves thread/resume payloads unchanged", () => {
   const request = {
     jsonrpc: "2.0",

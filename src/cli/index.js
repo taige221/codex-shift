@@ -234,6 +234,7 @@ function parseTuiArgs(args) {
     codexBin: process.env.CODEX_BIN,
     codexHome: process.env.CODEX_HOME,
     configPath: null,
+    cwdFilter: null,
     help: false,
     host: "127.0.0.1",
     hud: false,
@@ -258,6 +259,7 @@ function parseTuiArgs(args) {
     else if (arg === "--codex-bin") state.codexBin = requireValue(arg, args);
     else if (arg === "--codex-home") state.codexHome = requireValue(arg, args);
     else if (arg === "--config") state.configPath = requireValue(arg, args);
+    else if (arg === "--cwd-filter") state.cwdFilter = requireValue(arg, args);
     else if (arg === "--host") state.host = requireValue(arg, args);
     else if (arg === "--hud") state.hud = true;
     else if (arg === "--hud-height") state.hudHeight = requirePositiveInteger(arg, args);
@@ -460,6 +462,7 @@ Options:
   --proxy-port <port>  Port for codex-shift proxy; defaults to a free port
   --config <file>      JSON router config path
   --codex-home <dir>   Codex home for local usage reads
+  --cwd-filter <dir>   Internal: cwd filter passed through HUD tmux relaunch
   --status-file <path> Write latest routed turn status; defaults to ${DEFAULT_STATUS_FILE}
   --no-status          Do not write a HUD status file
   --summary <mode>     Summary mode injected into turn/start; defaults to concise

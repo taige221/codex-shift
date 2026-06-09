@@ -168,7 +168,7 @@ export function buildTuiPlan(options = {}) {
   if (options.summary === false) proxyArgs.push("--no-summary");
   else if (options.summary !== undefined) proxyArgs.push("--summary", options.summary);
   if (options.trace) proxyArgs.push("--trace");
-  const cwdFilter = options.cwdFilter ?? resolveResumeCwdFilter(options.codexArgs ?? [], options.launchCwd ?? process.cwd());
+  const cwdFilter = options.cwdFilter ?? resolveTuiCwdFilter(options.codexArgs ?? [], options.launchCwd ?? process.cwd());
   if (cwdFilter) proxyArgs.push("--cwd-filter", cwdFilter);
 
   const plan = {
@@ -182,7 +182,7 @@ export function buildTuiPlan(options = {}) {
     },
     tui: {
       command: realCodex,
-      args: buildNativeTuiArgs(proxyUrl, options.codexArgs ?? [])
+      args: buildNativeTuiArgs(proxyUrl, options.codexArgs ?? [], { cwdFilter })
     },
     realUrl,
     proxyUrl
@@ -205,10 +205,13 @@ export function buildTuiPlan(options = {}) {
 
 export function buildTmuxRelaunchPlan(options = {}) {
   const args = ["tui", "--hud", "--hud-launcher", "tmux"];
+  const launchCwd = options.launchCwd ?? process.cwd();
+  const cwdFilter = options.cwdFilter ?? resolveTuiCwdFilter(options.codexArgs ?? [], launchCwd);
 
   if (options.codexBin) args.push("--codex-bin", options.codexBin);
   if (options.codexHome) args.push("--codex-home", options.codexHome);
   if (options.configPath) args.push("--config", options.configPath);
+  if (cwdFilter) args.push("--cwd-filter", cwdFilter);
   if (options.host) args.push("--host", options.host);
   if (options.hudHeight !== undefined) args.push("--hud-height", String(options.hudHeight));
   if (options.hudVerbose) args.push("--hud-verbose");
@@ -225,7 +228,7 @@ export function buildTmuxRelaunchPlan(options = {}) {
   const commandParts = [process.execPath, CLI_PATH, ...args];
   return {
     command: "tmux",
-    args: ["new-session", shellQuote(commandParts)],
+    args: ["new-session", "-c", launchCwd, shellQuote(commandParts)],
     relaunch: {
       command: process.execPath,
       args: [CLI_PATH, ...args]
@@ -240,7 +243,10 @@ function shouldRelaunchInTmux(options, env) {
 }
 
 function runTuiInTmux(options, env) {
-  const plan = buildTmuxRelaunchPlan(options);
+  const plan = buildTmuxRelaunchPlan({
+    ...options,
+    launchCwd: process.cwd()
+  });
   const result = spawnSync(plan.command, plan.args, {
     cwd: process.cwd(),
     env,
@@ -281,24 +287,37 @@ export function buildTmuxHudOptionCommands(options = {}) {
   ];
 }
 
-function buildNativeTuiArgs(proxyUrl, codexArgs) {
+function buildNativeTuiArgs(proxyUrl, codexArgs, options = {}) {
   const commandIndex = findNativeCommandIndex(codexArgs);
+  const shouldInjectCwd = Boolean(
+    options.cwdFilter &&
+    findNativeOptionValue(codexArgs, new Set(["-C", "--cd"]), "--cd=") === null
+  );
+
   if (commandIndex !== -1 && codexArgs[commandIndex] === "resume") {
+    const beforeCommand = codexArgs.slice(0, commandIndex);
+    const afterCommand = codexArgs.slice(commandIndex + 1);
+
     return [
-      ...codexArgs.slice(0, commandIndex),
+      ...beforeCommand,
+      ...(shouldInjectCwd ? ["-C", options.cwdFilter] : []),
       "resume",
       "--remote",
       proxyUrl,
-      ...codexArgs.slice(commandIndex + 1)
+      ...afterCommand
     ];
   }
-  return ["--remote", proxyUrl, ...codexArgs];
+  return [
+    ...(shouldInjectCwd ? ["-C", options.cwdFilter] : []),
+    "--remote",
+    proxyUrl,
+    ...codexArgs
+  ];
 }
 
-function resolveResumeCwdFilter(codexArgs, launchCwd) {
+function resolveTuiCwdFilter(codexArgs, launchCwd) {
   const commandIndex = findNativeCommandIndex(codexArgs);
-  if (commandIndex === -1 || codexArgs[commandIndex] !== "resume") return null;
-  if (hasNativeFlag(codexArgs, "--all")) return null;
+  if (commandIndex !== -1 && codexArgs[commandIndex] === "resume" && hasNativeFlag(codexArgs, "--all")) return null;
 
   const explicitCwd = findNativeOptionValue(codexArgs, new Set(["-C", "--cd"]), "--cd=");
   return resolve(launchCwd, explicitCwd ?? ".");

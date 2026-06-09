@@ -115,9 +115,9 @@ codex TUI --remote ws://127.0.0.1:<proxyPort>
   -> real codex app-server --listen ws://127.0.0.1:<realPort>
 ```
 
-For `resume`, the supervisor invokes the native command as `codex resume --remote <proxy> ...` rather than `codex --remote <proxy> resume ...`, because `resume` owns its own remote connection flow. If native Codex options precede the command, for example `--no-alt-screen resume`, they stay before `resume` while `--remote <proxy>` is still injected after `resume`. Resume mode also injects the launch cwd into `thread/list` requests so the picker keeps native cwd filtering; `resume --all` disables that filter.
+The supervisor starts native TUI with an explicit `-C <cwd>` and routes it through `--remote <proxy>` so in-TUI resume actions keep the same project boundary. For `resume`, the supervisor invokes the native command as `codex -C <cwd> resume --remote <proxy> ...` rather than `codex --remote <proxy> resume ...`, because `resume` owns its own remote connection flow. If native Codex options precede the command, for example `--no-alt-screen resume`, they stay before `resume` while `-C <cwd>` is inserted before `resume` and `--remote <proxy>` is injected after `resume`. TUI mode also injects the launch cwd into `thread/list` requests as a protocol-level fallback; `resume --all` disables that filter.
 
-The proxy rewrites JSON-RPC `turn/start` requests and, when configured by resume mode, fills a missing `thread/list.cwd` filter. For turns, it extracts text input, runs `routePrompt`, injects `model`, `effort`, and `summary`, and adds read-only sandbox policy for explicit no-edit prompts. Other requests, responses, notifications, tool events, approvals, and streaming messages pass through unchanged.
+The proxy rewrites JSON-RPC `turn/start` requests and, when configured by TUI mode, fills a missing or null `thread/list.cwd` filter. For turns, it extracts text input, runs `routePrompt`, injects `model`, `effort`, and `summary`, and adds read-only sandbox policy for explicit no-edit prompts. Other requests, responses, notifications, tool events, approvals, and streaming messages pass through unchanged.
 
 Debug without logging prompt text:
 

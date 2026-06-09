@@ -34,12 +34,31 @@ test("builds remote TUI supervisor commands", () => {
     "/tmp/codex-shift-test.json",
     "--summary",
     "concise",
-    "--trace"
+    "--trace",
+    "--cwd-filter",
+    "/tmp/project"
   ]);
   assert.deepEqual(plan.tui, {
     command: "/opt/codex",
     args: ["--remote", "ws://127.0.0.1:19001", "-C", "/tmp/project", "--no-alt-screen"]
   });
+});
+
+test("builds cwd-aware remote TUI supervisor commands for plain launch", () => {
+  const plan = buildTuiPlan({
+    codexArgs: ["--no-alt-screen"],
+    host: "127.0.0.1",
+    launchCwd: "/tmp/project",
+    proxyPort: 19003,
+    realCodex: "/opt/codex",
+    realPort: 19002
+  });
+
+  assert.deepEqual(plan.tui, {
+    command: "/opt/codex",
+    args: ["-C", "/tmp/project", "--remote", "ws://127.0.0.1:19003", "--no-alt-screen"]
+  });
+  assert.deepEqual(plan.proxy.args.slice(-2), ["--cwd-filter", "/tmp/project"]);
 });
 
 test("builds remote TUI supervisor commands for resume", () => {
@@ -54,7 +73,7 @@ test("builds remote TUI supervisor commands for resume", () => {
 
   assert.deepEqual(plan.tui, {
     command: "/opt/codex",
-    args: ["resume", "--remote", "ws://127.0.0.1:19011", "--last"]
+    args: ["-C", "/tmp/project", "resume", "--remote", "ws://127.0.0.1:19011", "--last"]
   });
   assert.deepEqual(plan.proxy.args.slice(-2), ["--cwd-filter", "/tmp/project"]);
 });
@@ -79,6 +98,7 @@ test("does not treat resume after native separator as a command", () => {
   const plan = buildTuiPlan({
     codexArgs: ["--", "resume"],
     host: "127.0.0.1",
+    launchCwd: "/tmp/project",
     proxyPort: 19015,
     realCodex: "/opt/codex",
     realPort: 19014
@@ -86,9 +106,9 @@ test("does not treat resume after native separator as a command", () => {
 
   assert.deepEqual(plan.tui, {
     command: "/opt/codex",
-    args: ["--remote", "ws://127.0.0.1:19015", "--", "resume"]
+    args: ["-C", "/tmp/project", "--remote", "ws://127.0.0.1:19015", "--", "resume"]
   });
-  assert.equal(plan.proxy.args.includes("--cwd-filter"), false);
+  assert.deepEqual(plan.proxy.args.slice(-2), ["--cwd-filter", "/tmp/project"]);
 });
 
 test("does not add cwd filter for resume --all", () => {
@@ -116,6 +136,7 @@ test("builds tmux HUD pane command when enabled", () => {
     hud: true,
     hudHeight: 9,
     hudLauncher: "tmux",
+    launchCwd: "/tmp/project",
     proxyPort: 19021,
     realCodex: "/opt/codex",
     realPort: 19020,
@@ -140,6 +161,8 @@ test("builds tmux HUD pane command when enabled", () => {
     "/tmp/codex-shift-hud-test.json"
   ]);
   assert.deepEqual(plan.tui.args, [
+    "-C",
+    "/tmp/project",
     "--remote",
     "ws://127.0.0.1:19021",
     "--no-alt-screen"
@@ -230,6 +253,7 @@ test("builds tmux relaunch command for HUD outside tmux", () => {
     host: "127.0.0.1",
     hudHeight: 7,
     hudVerbose: true,
+    launchCwd: "/tmp/project",
     noUsage: true,
     statusFile: "/tmp/codex-shift-hud-test.json",
     trace: true
@@ -237,21 +261,25 @@ test("builds tmux relaunch command for HUD outside tmux", () => {
 
   assert.equal(plan.command, "tmux");
   assert.equal(plan.args[0], "new-session");
-  assert.match(plan.args[1], /tui --hud --hud-launcher tmux/);
-  assert.match(plan.args[1], /--codex-bin \/opt\/codex/);
-  assert.match(plan.args[1], /--config \/tmp\/router\.json/);
-  assert.match(plan.args[1], /--hud-height 7/);
-  assert.match(plan.args[1], /--hud-verbose/);
-  assert.match(plan.args[1], /--no-usage/);
-  assert.match(plan.args[1], /--status-file \/tmp\/codex-shift-hud-test\.json/);
-  assert.match(plan.args[1], /--trace/);
-  assert.match(plan.args[1], /-- --no-alt-screen resume/);
+  assert.deepEqual(plan.args.slice(1, 3), ["-c", "/tmp/project"]);
+  assert.match(plan.args[3], /tui --hud --hud-launcher tmux/);
+  assert.match(plan.args[3], /--codex-bin \/opt\/codex/);
+  assert.match(plan.args[3], /--config \/tmp\/router\.json/);
+  assert.match(plan.args[3], /--cwd-filter \/tmp\/project/);
+  assert.match(plan.args[3], /--hud-height 7/);
+  assert.match(plan.args[3], /--hud-verbose/);
+  assert.match(plan.args[3], /--no-usage/);
+  assert.match(plan.args[3], /--status-file \/tmp\/codex-shift-hud-test\.json/);
+  assert.match(plan.args[3], /--trace/);
+  assert.match(plan.args[3], /-- --no-alt-screen resume/);
   assert.deepEqual(plan.relaunch.args.slice(1, 5), [
     "tui",
     "--hud",
     "--hud-launcher",
     "tmux"
   ]);
+  const cwdFilterIndex = plan.relaunch.args.indexOf("--cwd-filter");
+  assert.equal(plan.relaunch.args[cwdFilterIndex + 1], "/tmp/project");
 });
 
 test("builds tmux scroll-friendly HUD options", () => {
