@@ -9,6 +9,17 @@ import {
   traceClientMessage,
   traceServerMessage
 } from "./trace.js";
+import {
+  OPCODE_BINARY,
+  OPCODE_CLOSE,
+  OPCODE_CONTINUATION,
+  OPCODE_PING,
+  OPCODE_PONG,
+  OPCODE_TEXT,
+  encodeFrame,
+  readFrame
+} from "./ws-frame.js";
+import { buildListenUrl, parseWsUrl } from "./ws-url.js";
 
 export {
   extractPromptText,
@@ -58,9 +69,7 @@ export async function startRemoteProxy(options = {}) {
     });
   });
 
-  const address = server.address();
-  const port = typeof address === "object" && address ? address.port : listen.port;
-  const url = `ws://${listen.hostname}:${port}`;
+  const url = buildListenUrl(listen, server.address());
 
   return {
     close: () => new Promise((resolve) => server.close(resolve)),
@@ -150,18 +159,6 @@ function acceptWebSocketUpgrade(request, socket) {
   ].join("\r\n"));
 }
 
-function parseWsUrl(value, label) {
-  if (!value) throw new Error(`Missing --${label}.`);
-  const url = new URL(value);
-  if (url.protocol !== "ws:") {
-    throw new Error(`Unsupported ${label} URL ${value}. Only ws:// is supported in this preview.`);
-  }
-  if (!url.hostname || !url.port) {
-    throw new Error(`${label} URL must include host and port.`);
-  }
-  return url;
-}
-
 function normalizeTargetPayload(data) {
   if (typeof data === "string") return { payload: data, binary: false };
   if (data instanceof ArrayBuffer) return { payload: Buffer.from(data), binary: true };
@@ -198,14 +195,14 @@ class WebSocketConnection extends EventEmitter {
   send(data, options = {}) {
     if (this.closed || this.socket.destroyed) return;
     const payload = Buffer.isBuffer(data) ? data : Buffer.from(String(data));
-    this.socket.write(encodeFrame(payload, options.binary ? 0x2 : 0x1));
+    this.socket.write(encodeFrame(payload, options.binary ? OPCODE_BINARY : OPCODE_TEXT));
   }
 
   close() {
     if (this.closed) return;
     this.closed = true;
     try {
-      this.socket.write(encodeFrame(Buffer.alloc(0), 0x8));
+      this.socket.write(encodeFrame(Buffer.alloc(0), OPCODE_CLOSE));
     } catch {
       // Socket may already be gone.
     }
@@ -214,59 +211,30 @@ class WebSocketConnection extends EventEmitter {
 
   readFrames() {
     while (this.buffer.length >= 2) {
-      const first = this.buffer[0];
-      const second = this.buffer[1];
-      const fin = Boolean(first & 0x80);
-      const opcode = first & 0x0f;
-      const masked = Boolean(second & 0x80);
-      let length = second & 0x7f;
-      let offset = 2;
-
-      if (length === 126) {
-        if (this.buffer.length < offset + 2) return;
-        length = this.buffer.readUInt16BE(offset);
-        offset += 2;
-      } else if (length === 127) {
-        if (this.buffer.length < offset + 8) return;
-        const bigLength = this.buffer.readBigUInt64BE(offset);
-        if (bigLength > BigInt(Number.MAX_SAFE_INTEGER)) {
-          this.close();
-          return;
-        }
-        length = Number(bigLength);
-        offset += 8;
+      const result = readFrame(this.buffer);
+      if (!result) return;
+      if (result.error) {
+        this.close();
+        return;
       }
 
-      const maskOffset = offset;
-      if (masked) offset += 4;
-      if (this.buffer.length < offset + length) return;
-
-      const mask = masked ? this.buffer.subarray(maskOffset, maskOffset + 4) : null;
-      let payload = Buffer.from(this.buffer.subarray(offset, offset + length));
-      this.buffer = this.buffer.subarray(offset + length);
-
-      if (masked) {
-        for (let index = 0; index < payload.length; index += 1) {
-          payload[index] ^= mask[index % 4];
-        }
-      }
-
-      this.handleFrame({ fin, opcode, payload });
+      this.buffer = result.remaining;
+      this.handleFrame(result.frame);
     }
   }
 
   handleFrame(frame) {
-    if (frame.opcode === 0x8) {
+    if (frame.opcode === OPCODE_CLOSE) {
       this.close();
       return;
     }
-    if (frame.opcode === 0x9) {
-      this.socket.write(encodeFrame(frame.payload, 0xA));
+    if (frame.opcode === OPCODE_PING) {
+      this.socket.write(encodeFrame(frame.payload, OPCODE_PONG));
       return;
     }
-    if (frame.opcode === 0xA) return;
+    if (frame.opcode === OPCODE_PONG) return;
 
-    if (frame.opcode === 0x0 && this.fragmented) {
+    if (frame.opcode === OPCODE_CONTINUATION && this.fragmented) {
       this.fragmented.parts.push(frame.payload);
       if (frame.fin) {
         const payload = Buffer.concat(this.fragmented.parts);
@@ -277,7 +245,7 @@ class WebSocketConnection extends EventEmitter {
       return;
     }
 
-    if (frame.opcode === 0x1 || frame.opcode === 0x2) {
+    if (frame.opcode === OPCODE_TEXT || frame.opcode === OPCODE_BINARY) {
       if (!frame.fin) {
         this.fragmented = { opcode: frame.opcode, parts: [frame.payload] };
         return;
@@ -287,29 +255,10 @@ class WebSocketConnection extends EventEmitter {
   }
 
   emitMessage(opcode, payload) {
-    if (opcode === 0x1) {
+    if (opcode === OPCODE_TEXT) {
       this.emit("message", { data: payload.toString("utf8"), binary: false });
-    } else if (opcode === 0x2) {
+    } else if (opcode === OPCODE_BINARY) {
       this.emit("message", { data: payload, binary: true });
     }
   }
-}
-
-function encodeFrame(payload, opcode) {
-  const length = payload.length;
-  let header;
-  if (length < 126) {
-    header = Buffer.alloc(2);
-    header[1] = length;
-  } else if (length <= 0xffff) {
-    header = Buffer.alloc(4);
-    header[1] = 126;
-    header.writeUInt16BE(length, 2);
-  } else {
-    header = Buffer.alloc(10);
-    header[1] = 127;
-    header.writeBigUInt64BE(BigInt(length), 2);
-  }
-  header[0] = 0x80 | opcode;
-  return Buffer.concat([header, payload]);
 }
