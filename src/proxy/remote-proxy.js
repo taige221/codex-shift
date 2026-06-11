@@ -1,14 +1,24 @@
 import { createHash } from "node:crypto";
 import { EventEmitter } from "node:events";
 import { createServer } from "node:http";
-import { routePrompt } from "../router/index.js";
-import { parsePromptEffortDirective } from "../router/directives.js";
-import { loadConfig } from "../config/index.js";
-import { readCodexUsage } from "../usage/index.js";
-import { buildRouteStatus, buildTokenUsageStatus, updateRouteStatus, writeRouteStatus } from "../ui/status.js";
+import { rewriteJsonRpcPayload } from "./rewrite.js";
+import { writeStatusForServerPayload } from "./status.js";
+import {
+  formatEventError,
+  trace,
+  traceClientMessage,
+  traceServerMessage
+} from "./trace.js";
+
+export {
+  extractPromptText,
+  rewriteJsonRpcMessage,
+  rewriteJsonRpcPayload
+} from "./rewrite.js";
+export { writeStatusForServerPayload } from "./status.js";
+export { summarizeServerMessage } from "./trace.js";
 
 const WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
-const DEFAULT_SUMMARY = "concise";
 let nextConnectionId = 1;
 
 export async function startRemoteProxy(options = {}) {
@@ -58,181 +68,6 @@ export async function startRemoteProxy(options = {}) {
     target: target.href,
     url
   };
-}
-
-export function rewriteJsonRpcPayload(payload, options = {}) {
-  const text = String(payload ?? "");
-  let parsed;
-  try {
-    parsed = JSON.parse(text);
-  } catch {
-    return { payload: text, routed: false, decision: null };
-  }
-
-  if (Array.isArray(parsed)) {
-    let routed = false;
-    let decision = null;
-    const messages = parsed.map((message) => {
-      const result = rewriteJsonRpcMessage(message, options);
-      if (result.routed) {
-        routed = true;
-        decision = result.decision;
-      }
-      return result.message;
-    });
-    return { payload: JSON.stringify(messages), routed, decision };
-  }
-
-  const result = rewriteJsonRpcMessage(parsed, options);
-  return {
-    payload: JSON.stringify(result.message),
-    routed: result.routed,
-    decision: result.decision
-  };
-}
-
-export function rewriteJsonRpcMessage(message, options = {}) {
-  if (isThreadListRequest(message)) {
-    return rewriteThreadListRequest(message, options);
-  }
-
-  if (!isTurnStartRequest(message)) {
-    return { message, routed: false, decision: null };
-  }
-
-  const prompt = extractPromptText(message.params.input);
-  const promptEffortDirective = parsePromptEffortDirective(prompt);
-  const configPath = options.configPath ?? process.env.CODEX_SHIFT_CONFIG;
-  const { config } = loadConfig(configPath);
-  const usage = options.noUsage || process.env.CODEX_SHIFT_NO_USAGE
-    ? null
-    : readCodexUsage(options.codexHome ?? process.env.CODEX_HOME);
-  const decision = routePrompt(promptEffortDirective.prompt, {
-    config,
-    model: message.params.model ?? undefined,
-    promptEffortDirective,
-    usage
-  });
-
-  const params = {
-    ...message.params,
-    model: decision.model,
-    effort: decision.effort
-  };
-
-  const summary = options.summary ?? DEFAULT_SUMMARY;
-  if (summary === false) {
-    delete params.summary;
-  } else if (summary !== undefined) {
-    params.summary = summary;
-  }
-
-  if (decision.readOnly) {
-    params.sandboxPolicy = {
-      type: "readOnly",
-      networkAccess: false
-    };
-  }
-
-  if (options.trace || process.env.CODEX_SHIFT_TRACE) {
-    console.error(
-      `[codex-shift] turn/start id=${message.id ?? "-"} model=${decision.model} effort=${decision.effort} classification=${decision.classification}`
-    );
-  }
-
-  writeStatusForTurn(message, decision, options);
-
-  return {
-    message: {
-      ...message,
-      params
-    },
-    routed: true,
-    decision
-  };
-}
-
-function rewriteThreadListRequest(message, options) {
-  const cwdFilter = options.cwdFilter ?? process.env.CODEX_SHIFT_CWD_FILTER;
-  if (!cwdFilter) {
-    return { message, routed: false, decision: null };
-  }
-
-  const params = message.params && typeof message.params === "object"
-    ? { ...message.params }
-    : {};
-  if (params.cwd !== undefined && params.cwd !== null) {
-    return { message, routed: false, decision: null };
-  }
-
-  params.cwd = cwdFilter;
-  trace(options, `thread/list id=${message.id ?? "-"} cwd filter applied`);
-  return {
-    message: {
-      ...message,
-      params
-    },
-    routed: false,
-    decision: null
-  };
-}
-
-function writeStatusForTurn(message, decision, options) {
-  const statusFile = resolveProxyStatusFile(options);
-  if (!statusFile) return;
-
-  try {
-    writeRouteStatus(statusFile, buildRouteStatus(message, decision));
-  } catch (error) {
-    trace(options, `status write failed: ${error.message}`);
-  }
-}
-
-export function writeStatusForServerPayload(payload, options = {}) {
-  const statusFile = resolveProxyStatusFile(options);
-  if (!statusFile) return;
-
-  let parsed;
-  try {
-    parsed = JSON.parse(String(payload));
-  } catch {
-    return;
-  }
-
-  const messages = Array.isArray(parsed) ? parsed : [parsed];
-  for (const message of messages) {
-    writeStatusForServerMessage(message, statusFile, options);
-  }
-}
-
-function writeStatusForServerMessage(message, statusFile, options) {
-  if (!isTokenUsageNotification(message)) return;
-
-  try {
-    updateRouteStatus(statusFile, buildTokenUsageStatus(message));
-  } catch (error) {
-    trace(options, `token usage status write failed: ${error.message}`);
-  }
-}
-
-function resolveProxyStatusFile(options) {
-  return options.statusFile === null || options.statusFile === false
-    ? null
-    : options.statusFile ?? process.env.CODEX_SHIFT_STATUS_FILE;
-}
-
-export function extractPromptText(input) {
-  if (!Array.isArray(input)) return "";
-  return input
-    .map((item) => {
-      if (!item || typeof item !== "object") return "";
-      if (typeof item.text === "string") return item.text;
-      if (typeof item.content === "string") return item.content;
-      return "";
-    })
-    .filter(Boolean)
-    .join("\n")
-    .trim();
 }
 
 function attachRelay(client, targetUrl, options) {
@@ -327,34 +162,6 @@ function parseWsUrl(value, label) {
   return url;
 }
 
-function isTurnStartRequest(message) {
-  return Boolean(
-    message &&
-    typeof message === "object" &&
-    message.method === "turn/start" &&
-    message.params &&
-    typeof message.params === "object"
-  );
-}
-
-function isThreadListRequest(message) {
-  return Boolean(
-    message &&
-    typeof message === "object" &&
-    message.method === "thread/list"
-  );
-}
-
-function isTokenUsageNotification(message) {
-  return Boolean(
-    message &&
-    typeof message === "object" &&
-    message.method === "thread/tokenUsage/updated" &&
-    message.params &&
-    typeof message.params === "object"
-  );
-}
-
 function normalizeTargetPayload(data) {
   if (typeof data === "string") return { payload: data, binary: false };
   if (data instanceof ArrayBuffer) return { payload: Buffer.from(data), binary: true };
@@ -365,104 +172,6 @@ function normalizeTargetPayload(data) {
     };
   }
   return { payload: String(data ?? ""), binary: false };
-}
-
-function traceClientMessage(data, options, label) {
-  if (!shouldTrace(options)) return;
-  let parsed;
-  try {
-    parsed = JSON.parse(String(data));
-  } catch {
-    trace(options, `${label} client -> target non-json text`);
-    return;
-  }
-
-  if (Array.isArray(parsed)) {
-    trace(options, `${label} client -> target batch size=${parsed.length}`);
-    return;
-  }
-
-  trace(options, `${label} client -> target method=${parsed.method ?? "response"} id=${parsed.id ?? "-"}`);
-}
-
-function traceServerMessage(data, options, label) {
-  if (!shouldTrace(options)) return;
-  let parsed;
-  try {
-    parsed = JSON.parse(String(data));
-  } catch {
-    trace(options, `${label} target -> client non-json text`);
-    return;
-  }
-
-  if (Array.isArray(parsed)) {
-    trace(options, `${label} target -> client batch size=${parsed.length}`);
-    return;
-  }
-
-  const method = parsed.method ?? "response";
-  const suffix = summarizeServerMessage(parsed);
-  trace(options, `${label} target -> client method=${method} id=${parsed.id ?? "-"}${suffix}`);
-}
-
-export function summarizeServerMessage(message) {
-  const params = message.params ?? {};
-  if (message.method === "thread/settings/updated") {
-    const settings = params.settings ?? params;
-    return formatModelEffort(settings, " settings");
-  }
-  if (message.method === "turn/started") {
-    return formatModelEffort(params, " turn");
-  }
-  if (message.method === "model/rerouted") {
-    return formatModelEffort(params, " reroute");
-  }
-  if (message.method === "thread/tokenUsage/updated") {
-    return formatTokenUsage(params.tokenUsage?.last, " token_usage");
-  }
-  if (message.result && typeof message.result === "object") {
-    const result = message.result;
-    const candidates = [
-      result,
-      result.thread,
-      result.thread?.settings,
-      result.settings
-    ];
-    for (const candidate of candidates) {
-      const formatted = formatModelEffort(candidate, " result");
-      if (formatted) return formatted;
-    }
-  }
-  return "";
-}
-
-function formatTokenUsage(value, label) {
-  if (!value || typeof value !== "object") return "";
-  const inputTokens = value.inputTokens;
-  const cachedInputTokens = value.cachedInputTokens;
-  if (typeof inputTokens !== "number" && typeof cachedInputTokens !== "number") return "";
-  return `${label} input_tokens=${inputTokens ?? "-"} cached_input_tokens=${cachedInputTokens ?? "-"}`;
-}
-
-function formatModelEffort(value, label) {
-  if (!value || typeof value !== "object") return "";
-  const model = value.model ?? value.settings?.model ?? null;
-  const effort = value.effort ?? value.reasoning_effort ?? value.settings?.effort ?? null;
-  if (!model && !effort) return "";
-  return `${label} model=${model ?? "-"} effort=${effort ?? "-"}`;
-}
-
-function trace(options, message) {
-  if (!shouldTrace(options)) return;
-  console.error(`[codex-shift:proxy] ${message}`);
-}
-
-function shouldTrace(options) {
-  return Boolean(options.trace || process.env.CODEX_SHIFT_TRACE);
-}
-
-function formatEventError(event) {
-  return event?.message ?? event?.error?.message ?? "";
 }
 
 class WebSocketConnection extends EventEmitter {

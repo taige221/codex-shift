@@ -6,9 +6,14 @@ import { join } from "node:path";
 import {
   extractPromptText,
   rewriteJsonRpcMessage,
-  rewriteJsonRpcPayload,
+  rewriteJsonRpcPayload
+} from "../src/proxy/rewrite.js";
+import { writeStatusForServerPayload } from "../src/proxy/status.js";
+import {
   summarizeServerMessage,
-  writeStatusForServerPayload
+} from "../src/proxy/trace.js";
+import {
+  rewriteJsonRpcPayload as rewriteJsonRpcPayloadFromRemoteProxy
 } from "../src/proxy/remote-proxy.js";
 
 test("extracts text prompt from app-server input", () => {
@@ -20,6 +25,10 @@ test("extracts text prompt from app-server input", () => {
     ]),
     "第一段\n第二段"
   );
+});
+
+test("remote-proxy preserves rewrite helper re-exports", () => {
+  assert.equal(rewriteJsonRpcPayloadFromRemoteProxy, rewriteJsonRpcPayload);
 });
 
 test("rewrites turn/start with routed model and effort", () => {
