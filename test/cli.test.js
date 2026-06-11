@@ -8,6 +8,22 @@ import { fileURLToPath } from "node:url";
 
 const CLI_PATH = fileURLToPath(new URL("../src/cli/index.js", import.meta.url));
 
+test("main help exits successfully through CLI wrapper", () => {
+  const result = runCli(["--help"]);
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /^codex-router - choose model and reasoning effort/m);
+});
+
+test("dry-run exec still routes through CLI wrapper", () => {
+  const result = runCli(["dry-run", "fix this failing test"]);
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /effort: medium/);
+  assert.match(result.stdout, /classification: coding/);
+  assert.match(result.stdout, /command: codex exec/);
+});
+
 test("dry-run app-server previews turn/start without executing proxy", () => {
   const missingCodex = "/tmp/codex-shift-missing-codex";
   const result = runCli([
